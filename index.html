@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alex Voice Assistant Test</title>
+    <style>
+        body { 
+            font-family: sans-serif; 
+            background-color: #121212; 
+            color: #ffffff; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            height: 100vh; 
+            margin: 0; 
+        }
+        button { 
+            padding: 15px 30px; 
+            font-size: 20px; 
+            background-color: #00e676; 
+            color: #000; 
+            border: none; 
+            border-radius: 50px; 
+            cursor: pointer; 
+            font-weight: bold; 
+            box-shadow: 0 4px 15px rgba(0, 230, 118, 0.4);
+            transition: 0.3s;
+        }
+        button.listening { 
+            background-color: #f44336; 
+            color: #fff; 
+            box-shadow: 0 4px 15px rgba(244, 67, 54, 0.4);
+        }
+        #status { margin-top: 20px; font-size: 18px; color: #aaaaaa; }
+        #transcript { margin-top: 30px; font-size: 24px; text-align: center; max-width: 90%; }
+        #reply { margin-top: 20px; font-size: 22px; color: #00e676; text-align: center; max-width: 90%; }
+    </style>
+</head>
+<body>
+
+    <button id="micBtn">Start Alex Assistant</button>
+    <div id="status">Click the button to allow microphone access.</div>
+    
+    <div id="transcript"></div>
+    <div id="reply"></div>
+
+    <script>
+        const micBtn = document.getElementById('micBtn');
+        const statusDiv = document.getElementById('status');
+        const transcriptDiv = document.getElementById('transcript');
+        const replyDiv = document.getElementById('reply');
+
+        // Your live Render server URL
+        const SERVER_URL = 'https://alex-backend-1-moif.onrender.com/chat';
+
+        // 1. Initialize Speech Recognition (Speech-to-Text)
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true; 
+        recognition.interimResults = false;
+        recognition.lang = 'en-US';
+
+        let isListening = false;
+        let isSpeaking = false; 
+
+        // Toggle Microphone Button
+        micBtn.onclick = () => {
+            if (!isListening) {
+                recognition.start();
+            } else {
+                recognition.stop();
+            }
+        };
+
+        recognition.onstart = () => {
+            isListening = true;
+            micBtn.textContent = 'Stop Listening';
+            micBtn.classList.add('listening');
+            statusDiv.textContent = 'Listening for "Alex"...';
+        };
+
+        // Auto-restart listening if it drops, unless Alex is currently talking
+        recognition.onend = () => {
+            isListening = false;
+            micBtn.textContent = 'Start Alex Assistant';
+            micBtn.classList.remove('listening');
+            
+            if (!isSpeaking) {
+                setTimeout(() => recognition.start(), 300);
+            }
+        };
+
+        // 2. Handle the User's Spoken Words
+        recognition.onresult = async (event) => {
+            const current = event.resultIndex;
+            const rawTranscript = event.results[current][0].transcript.trim().toLowerCase();
+            transcriptDiv.textContent = `You: "${rawTranscript}"`;
+
+            // Trigger A: User just says "Alex"
+            if (rawTranscript === "alex" || rawTranscript === "hey alex") {
+                speakText("What can I do for you, sir?");
+                return;
+            }
+
+            // Trigger B: User says "Alex [question]"
+            if (rawTranscript.startsWith("alex ") || rawTranscript.startsWith("hey alex ")) {
+                
+                // Remove the wake word to isolate the specific question
+                let question = rawTranscript.replace("hey alex", "").replace("alex", "").trim();
+                
+                statusDiv.textContent = 'Sending to server...';
+                replyDiv.textContent = 'Thinking...';
+                
+                // Pause the microphone so Alex doesn't accidentally listen to his own answer
+                recognition.stop(); 
+                
+                try {
+                    // Send HTTP POST Request to your Render Server
+                    const response = await fetch(SERVER_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ message: question })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.reply) {
+                        replyDiv.textContent = `Alex: ${data.reply}`;
+                        speakText(data.reply); // Read the answer out loud
+                    } else {
+                        replyDiv.textContent = 'Error: No reply found.';
+                        speakText("Sorry, I encountered an error.");
+                    }
+                } catch (error) {
+                    console.error(error);
+                    replyDiv.textContent = 'Network Error.';
+                    speakText("Sorry, I could not connect to the backend server.");
+                }
+            }
+        };
+
+        // 3. Initialize Speech Synthesis (Text-to-Speech)
+        function speakText(text) {
+            isSpeaking = true;
+            recognition.stop(); 
+
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.pitch = 1;
+            utterance.rate = 1;
+
+            utterance.onstart = () => {
+                statusDiv.textContent = 'Alex is speaking...';
+            };
+
+            // When Alex finishes speaking, automatically turn the microphone back on
+            utterance.onend = () => {
+                isSpeaking = false;
+                replyDiv.textContent = '';
+                transcriptDiv.textContent = '';
+                statusDiv.textContent = 'Listening for "Alex"...';
+                recognition.start();
+            };
+
+            window.speechSynthesis.speak(utterance);
+        }
+    </script>
+</body>
+</html>
