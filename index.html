@@ -33,9 +33,9 @@
             color: #fff; 
             box-shadow: 0 4px 15px rgba(244, 67, 54, 0.4);
         }
-        #status { margin-top: 20px; font-size: 16px; color: #aaaaaa; }
-        #transcript { margin-top: 30px; font-size: 24px; text-align: center; max-width: 90%; color: #e0e0e0; min-height: 60px; }
-        #reply { margin-top: 20px; font-size: 22px; color: #00e676; text-align: center; max-width: 90%; min-height: 60px; }
+        #status { margin-top: 20px; font-size: 16px; color: #aaaaaa; text-align: center; }
+        #transcript { margin-top: 30px; font-size: 24px; text-align: center; max-width: 90%; color: #e0e0e0; min-height: 50px; }
+        #reply { margin-top: 20px; font-size: 22px; color: #00e676; text-align: center; max-width: 90%; min-height: 50px; }
     </style>
 </head>
 <body>
@@ -63,7 +63,7 @@
         let userWantsListening = false;
         let isSpeaking = false; 
         let silenceTimer = null;
-        let lastSpokenText = "";
+        let lastSpokenCleanText = "";
 
         micBtn.onclick = () => {
             if (!userWantsListening) {
@@ -77,33 +77,26 @@
 
         function startListening() {
             if (isSpeaking) return;
-            try {
-                recognition.start();
-            } catch (e) {}
+            try { recognition.start(); } catch (e) {}
         }
 
         function stopListening() {
-            try {
-                recognition.stop();
-            } catch (e) {}
+            try { recognition.stop(); } catch (e) {}
         }
 
         recognition.onstart = () => {
             micBtn.textContent = 'Stop Listening';
             micBtn.classList.add('listening');
-            statusDiv.textContent = 'Listening... Say "Alex"';
+            statusDiv.textContent = 'Listening... Say "Alex" or "Alex, what is helium?"';
         };
 
         recognition.onend = () => {
             micBtn.textContent = 'Start Alex Assistant';
             micBtn.classList.remove('listening');
 
-            // Only restart if user turned it on AND Alex isn't speaking
             if (userWantsListening && !isSpeaking) {
                 setTimeout(() => {
-                    if (userWantsListening && !isSpeaking) {
-                        startListening();
-                    }
+                    if (userWantsListening && !isSpeaking) startListening();
                 }, 400);
             }
         };
@@ -111,42 +104,43 @@
         recognition.onresult = (event) => {
             if (isSpeaking) return;
 
-            let currentText = "";
+            let rawText = "";
             for (let i = event.resultIndex; i < event.results.length; ++i) {
-                currentText += event.results[i][0].transcript;
+                rawText += event.results[i][0].transcript;
             }
 
-            currentText = currentText.trim().toLowerCase();
-            if (!currentText) return;
+            // Strip out punctuation (commas, question marks, periods) so Chrome STT doesn't break matching
+            let cleanText = rawText.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, "").replace(/\s{2,}/g, " ").trim().toLowerCase();
+            if (!cleanText) return;
 
-            transcriptDiv.textContent = `You: "${currentText}"`;
-            lastSpokenText = currentText;
+            transcriptDiv.textContent = `You: "${cleanText}"`;
+            lastSpokenCleanText = cleanText;
 
-            // Trigger A: Wake word only
-            if (currentText === "alex" || currentText === "hey alex") {
+            // Trigger A: User just says "Alex" or "Hey Alex"
+            if (cleanText === "alex" || cleanText === "hey alex") {
                 clearTimeout(silenceTimer);
                 stopListening();
                 speakText("What can I do for you, sir?");
                 return;
             }
 
-            // Trigger B: Wake word + Question
-            if (currentText.startsWith("alex ") || currentText.startsWith("hey alex ")) {
+            // Trigger B: User says "Alex [Question]"
+            if (cleanText.startsWith("alex ") || cleanText.startsWith("hey alex ")) {
                 clearTimeout(silenceTimer);
                 silenceTimer = setTimeout(() => {
-                    processQuestion(lastSpokenText);
+                    processQuestion(lastSpokenCleanText);
                 }, 800);
             }
         };
 
-        async function processQuestion(rawTranscript) {
+        async function processQuestion(cleanText) {
             clearTimeout(silenceTimer);
             stopListening();
 
-            let question = rawTranscript.replace("hey alex", "").replace("alex", "").trim();
+            let question = cleanText.replace("hey alex", "").replace("alex", "").trim();
             if (!question) return;
 
-            statusDiv.textContent = 'Sending to server...';
+            statusDiv.textContent = 'Connecting to Render server (may take 30s if waking up)...';
             replyDiv.textContent = 'Thinking...';
 
             try {
@@ -162,12 +156,13 @@
                     replyDiv.textContent = `Alex: ${data.reply}`;
                     speakText(data.reply);
                 } else {
-                    replyDiv.textContent = 'Error getting response.';
+                    replyDiv.textContent = 'Server returned empty response.';
                     speakText("Sorry, I encountered an error.");
                 }
             } catch (error) {
+                console.error(error);
                 replyDiv.textContent = 'Network Connection Error.';
-                speakText("Could not reach backend server.");
+                speakText("Could not connect to the server.");
             }
         }
 
@@ -175,7 +170,6 @@
             isSpeaking = true;
             stopListening();
 
-            // Clear any previous queued audio
             window.speechSynthesis.cancel();
 
             const utterance = new SpeechSynthesisUtterance(text);
@@ -187,16 +181,13 @@
             };
 
             utterance.onend = () => {
-                statusDiv.textContent = 'Clearing audio...';
+                statusDiv.textContent = 'Ready!';
                 
-                // 1-second delay lets speaker hardware completely close before opening mic
                 setTimeout(() => {
                     isSpeaking = false;
                     replyDiv.textContent = '';
                     transcriptDiv.textContent = '';
-                    if (userWantsListening) {
-                        startListening();
-                    }
+                    if (userWantsListening) startListening();
                 }, 1000); 
             };
 
