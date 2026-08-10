@@ -13,12 +13,14 @@
             flex-direction: column; 
             align-items: center; 
             justify-content: center; 
-            height: 100vh; 
+            min-height: 100vh; 
             margin: 0; 
+            padding: 20px;
+            box-sizing: border-box;
         }
-        button { 
-            padding: 18px 36px; 
-            font-size: 20px; 
+        button.mic-btn { 
+            padding: 20px 40px; 
+            font-size: 22px; 
             background-color: #00e676; 
             color: #000; 
             border: none; 
@@ -28,20 +30,21 @@
             box-shadow: 0 4px 15px rgba(0, 230, 118, 0.4);
             transition: 0.2s;
         }
-        button.listening { 
+        button.mic-btn.listening { 
             background-color: #f44336; 
             color: #fff; 
             box-shadow: 0 4px 15px rgba(244, 67, 54, 0.4);
         }
-        #status { margin-top: 20px; font-size: 16px; color: #aaaaaa; text-align: center; }
-        #transcript { margin-top: 30px; font-size: 24px; text-align: center; max-width: 90%; color: #e0e0e0; min-height: 50px; }
-        #reply { margin-top: 20px; font-size: 22px; color: #00e676; text-align: center; max-width: 90%; min-height: 50px; }
+        #status { margin-top: 20px; font-size: 18px; color: #aaaaaa; text-align: center; }
+        #transcript { margin-top: 30px; font-size: 24px; text-align: center; max-width: 90%; color: #e0e0e0; min-height: 40px; }
+        #reply { margin-top: 20px; font-size: 22px; color: #00e676; text-align: center; max-width: 90%; min-height: 40px; line-height: 1.4; }
     </style>
 </head>
 <body>
 
-    <button id="micBtn">Start Alex Assistant</button>
-    <div id="status">Click button to allow microphone</div>
+    <button id="micBtn" class="mic-btn">Start Listening</button>
+    <div id="status">Tap "Start", ask your question, then tap "Stop & Send"</div>
+    
     <div id="transcript"></div>
     <div id="reply"></div>
 
@@ -51,6 +54,7 @@
         const transcriptDiv = document.getElementById('transcript');
         const replyDiv = document.getElementById('reply');
 
+        // Your live Render backend
         const SERVER_URL = 'https://alex-backend-1-moif.onrender.com/chat';
 
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -60,140 +64,94 @@
         recognition.interimResults = true; 
         recognition.lang = 'en-US';
 
-        let userWantsListening = false;
-        let isSpeaking = false; 
-        let silenceTimer = null;
-        let lastSpokenCleanText = "";
+        let currentSpeech = "";
 
+        // --- 1. THE WALKIE-TALKIE BUTTON LOGIC ---
         micBtn.onclick = () => {
-            if (!userWantsListening) {
-                userWantsListening = true;
-                startListening();
+            if (micBtn.textContent === "Start Listening") {
+                // START RECORDING
+                currentSpeech = "";
+                transcriptDiv.textContent = "";
+                replyDiv.textContent = "";
+                
+                micBtn.textContent = "Stop & Send";
+                micBtn.classList.add('listening');
+                statusDiv.textContent = "🔴 Recording... Speak your question now!";
+                
+                window.speechSynthesis.cancel(); // Stop any leftover speech
+                recognition.start();
             } else {
-                userWantsListening = false;
-                stopListening();
+                // STOP AND SEND
+                micBtn.textContent = "Start Listening";
+                micBtn.classList.remove('listening');
+                statusDiv.textContent = "Sending to server...";
+                
+                recognition.stop();
+                
+                if (currentSpeech.trim() !== "") {
+                    processQuestion(currentSpeech);
+                } else {
+                    statusDiv.textContent = "I didn't hear anything. Try again.";
+                }
             }
         };
 
-        function startListening() {
-            if (isSpeaking) return;
-            try { recognition.start(); } catch (e) {}
-        }
-
-        function stopListening() {
-            try { recognition.stop(); } catch (e) {}
-        }
-
-        recognition.onstart = () => {
-            micBtn.textContent = 'Stop Listening';
-            micBtn.classList.add('listening');
-            statusDiv.textContent = 'Listening... Say "Alex" or "Alex, what is helium?"';
-        };
-
-        recognition.onend = () => {
-            micBtn.textContent = 'Start Alex Assistant';
-            micBtn.classList.remove('listening');
-
-            if (userWantsListening && !isSpeaking) {
-                setTimeout(() => {
-                    if (userWantsListening && !isSpeaking) startListening();
-                }, 400);
-            }
-        };
-
+        // --- 2. LIVE TEXT DISPLAY ---
         recognition.onresult = (event) => {
-            if (isSpeaking) return;
-
-            let rawText = "";
-            for (let i = event.resultIndex; i < event.results.length; ++i) {
-                rawText += event.results[i][0].transcript;
+            let text = "";
+            for (let i = 0; i < event.results.length; ++i) {
+                text += event.results[i][0].transcript;
             }
+            currentSpeech = text;
+            transcriptDiv.textContent = `You: "${currentSpeech}"`;
+        };
 
-            // Strip out punctuation (commas, question marks, periods) so Chrome STT doesn't break matching
-            let cleanText = rawText.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, "").replace(/\s{2,}/g, " ").trim().toLowerCase();
-            if (!cleanText) return;
-
-            transcriptDiv.textContent = `You: "${cleanText}"`;
-            lastSpokenCleanText = cleanText;
-
-            // Trigger A: User just says "Alex" or "Hey Alex"
-            if (cleanText === "alex" || cleanText === "hey alex") {
-                clearTimeout(silenceTimer);
-                stopListening();
-                speakText("What can I do for you, sir?");
-                return;
-            }
-
-            // Trigger B: User says "Alex [Question]"
-            if (cleanText.startsWith("alex ") || cleanText.startsWith("hey alex ")) {
-                clearTimeout(silenceTimer);
-                silenceTimer = setTimeout(() => {
-                    processQuestion(lastSpokenCleanText);
-                }, 800);
+        // Prevent the browser from cutting off early if there is a long pause
+        recognition.onend = () => {
+            if (micBtn.textContent === "Stop & Send") {
+                recognition.start(); 
             }
         };
 
-        async function processQuestion(cleanText) {
-            clearTimeout(silenceTimer);
-            stopListening();
-
-            let question = cleanText.replace("hey alex", "").replace("alex", "").trim();
-            if (!question) return;
-
-            statusDiv.textContent = 'Connecting to Render server (may take 30s if waking up)...';
-            replyDiv.textContent = 'Thinking...';
+        // --- 3. SERVER CONNECTION ---
+        async function processQuestion(questionText) {
+            replyDiv.textContent = 'Alex is thinking...';
 
             try {
                 const response = await fetch(SERVER_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: question })
+                    body: JSON.stringify({ message: questionText })
                 });
 
                 const data = await response.json();
 
                 if (data.reply) {
                     replyDiv.textContent = `Alex: ${data.reply}`;
+                    statusDiv.textContent = "Done!";
                     speakText(data.reply);
                 } else {
-                    replyDiv.textContent = 'Server returned empty response.';
-                    speakText("Sorry, I encountered an error.");
+                    replyDiv.textContent = 'Error: No reply tag in JSON.';
                 }
             } catch (error) {
                 console.error(error);
-                replyDiv.textContent = 'Network Connection Error.';
-                speakText("Could not connect to the server.");
+                replyDiv.textContent = 'Network Error.';
+                statusDiv.textContent = "Could not connect to the server.";
             }
         }
 
+        // --- 4. TEXT TO SPEECH OUTPUT ---
         function speakText(text) {
-            isSpeaking = true;
-            stopListening();
-
-            window.speechSynthesis.cancel();
-
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.pitch = 1;
             utterance.rate = 1.0;
 
             utterance.onstart = () => {
-                statusDiv.textContent = 'Alex speaking...';
+                statusDiv.textContent = 'Alex is speaking...';
             };
 
             utterance.onend = () => {
-                statusDiv.textContent = 'Ready!';
-                
-                setTimeout(() => {
-                    isSpeaking = false;
-                    replyDiv.textContent = '';
-                    transcriptDiv.textContent = '';
-                    if (userWantsListening) startListening();
-                }, 1000); 
-            };
-
-            utterance.onerror = () => {
-                isSpeaking = false;
-                if (userWantsListening) startListening();
+                statusDiv.textContent = 'Tap "Start" to ask another question.';
             };
 
             window.speechSynthesis.speak(utterance);
