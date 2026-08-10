@@ -54,7 +54,6 @@
         const transcriptDiv = document.getElementById('transcript');
         const replyDiv = document.getElementById('reply');
 
-        // Your live Render backend
         const SERVER_URL = 'https://alex-backend-1-moif.onrender.com/chat';
 
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -65,12 +64,14 @@
         recognition.lang = 'en-US';
 
         let currentSpeech = "";
+        let finalTranscript = ""; 
 
         // --- 1. THE WALKIE-TALKIE BUTTON LOGIC ---
         micBtn.onclick = () => {
             if (micBtn.textContent === "Start Listening") {
                 // START RECORDING
                 currentSpeech = "";
+                finalTranscript = ""; // Reset the transcript memory safely
                 transcriptDiv.textContent = "";
                 replyDiv.textContent = "";
                 
@@ -78,7 +79,7 @@
                 micBtn.classList.add('listening');
                 statusDiv.textContent = "🔴 Recording... Speak your question now!";
                 
-                window.speechSynthesis.cancel(); // Stop any leftover speech
+                window.speechSynthesis.cancel(); 
                 recognition.start();
             } else {
                 // STOP AND SEND
@@ -96,17 +97,23 @@
             }
         };
 
-        // --- 2. LIVE TEXT DISPLAY ---
+        // --- 2. LIVE TEXT DISPLAY (ANDROID BUG FIX APPLIED) ---
         recognition.onresult = (event) => {
-            let text = "";
-            for (let i = 0; i < event.results.length; ++i) {
-                text += event.results[i][0].transcript;
+            let interimTranscript = "";
+            
+            // Strictly separate final words from guessed words to prevent the stuttering loop
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                if (event.results[i].isFinal) {
+                    finalTranscript += event.results[i][0].transcript;
+                } else {
+                    interimTranscript += event.results[i][0].transcript;
+                }
             }
-            currentSpeech = text;
+            
+            currentSpeech = finalTranscript + interimTranscript;
             transcriptDiv.textContent = `You: "${currentSpeech}"`;
         };
 
-        // Prevent the browser from cutting off early if there is a long pause
         recognition.onend = () => {
             if (micBtn.textContent === "Stop & Send") {
                 recognition.start(); 
