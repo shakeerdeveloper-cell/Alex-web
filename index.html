@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Alex Ultra-Fast Voice Test</title>
+    <title>Alex Voice Assistant</title>
     <style>
         body { 
             font-family: system-ui, -apple-system, sans-serif; 
@@ -34,14 +34,14 @@
             box-shadow: 0 4px 15px rgba(244, 67, 54, 0.4);
         }
         #status { margin-top: 20px; font-size: 16px; color: #aaaaaa; }
-        #transcript { margin-top: 30px; font-size: 26px; text-align: center; max-width: 90%; color: #e0e0e0; min-height: 60px; }
+        #transcript { margin-top: 30px; font-size: 24px; text-align: center; max-width: 90%; color: #e0e0e0; min-height: 60px; }
         #reply { margin-top: 20px; font-size: 22px; color: #00e676; text-align: center; max-width: 90%; min-height: 60px; }
     </style>
 </head>
 <body>
 
     <button id="micBtn">Start Alex Assistant</button>
-    <div id="status">Click button to enable microphone</div>
+    <div id="status">Click button to allow microphone</div>
     <div id="transcript"></div>
     <div id="reply"></div>
 
@@ -55,44 +55,63 @@
 
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         const recognition = new SpeechRecognition();
-        
+
         recognition.continuous = true; 
-        recognition.interimResults = true; // Real-time word-by-word streaming
+        recognition.interimResults = true; 
         recognition.lang = 'en-US';
 
-        let isListening = false;
+        let userWantsListening = false;
         let isSpeaking = false; 
         let silenceTimer = null;
         let lastSpokenText = "";
 
         micBtn.onclick = () => {
-            if (!isListening) {
-                recognition.start();
+            if (!userWantsListening) {
+                userWantsListening = true;
+                startListening();
             } else {
-                recognition.stop();
+                userWantsListening = false;
+                stopListening();
             }
         };
 
+        function startListening() {
+            if (isSpeaking) return;
+            try {
+                recognition.start();
+            } catch (e) {}
+        }
+
+        function stopListening() {
+            try {
+                recognition.stop();
+            } catch (e) {}
+        }
+
         recognition.onstart = () => {
-            isListening = true;
             micBtn.textContent = 'Stop Listening';
             micBtn.classList.add('listening');
             statusDiv.textContent = 'Listening... Say "Alex"';
         };
 
         recognition.onend = () => {
-            isListening = false;
             micBtn.textContent = 'Start Alex Assistant';
             micBtn.classList.remove('listening');
-            if (!isSpeaking) {
-                setTimeout(() => { try { recognition.start(); } catch(e){} }, 200);
+
+            // Only restart if user turned it on AND Alex isn't speaking
+            if (userWantsListening && !isSpeaking) {
+                setTimeout(() => {
+                    if (userWantsListening && !isSpeaking) {
+                        startListening();
+                    }
+                }, 400);
             }
         };
 
-        // Real-Time Speech Processing
         recognition.onresult = (event) => {
-            let currentText = "";
+            if (isSpeaking) return;
 
+            let currentText = "";
             for (let i = event.resultIndex; i < event.results.length; ++i) {
                 currentText += event.results[i][0].transcript;
             }
@@ -100,30 +119,29 @@
             currentText = currentText.trim().toLowerCase();
             if (!currentText) return;
 
-            // Live Typing: Display text instantly on screen as you talk
             transcriptDiv.textContent = `You: "${currentText}"`;
             lastSpokenText = currentText;
 
-            // Instant Wake-Word Trigger ("Alex" or "Hey Alex")
+            // Trigger A: Wake word only
             if (currentText === "alex" || currentText === "hey alex") {
                 clearTimeout(silenceTimer);
-                recognition.stop();
+                stopListening();
                 speakText("What can I do for you, sir?");
                 return;
             }
 
-            // Quick Silence Detector (Sends request 700ms after you stop speaking)
+            // Trigger B: Wake word + Question
             if (currentText.startsWith("alex ") || currentText.startsWith("hey alex ")) {
                 clearTimeout(silenceTimer);
                 silenceTimer = setTimeout(() => {
                     processQuestion(lastSpokenText);
-                }, 700); // 700 milliseconds of silence triggers instant send
+                }, 800);
             }
         };
 
         async function processQuestion(rawTranscript) {
             clearTimeout(silenceTimer);
-            recognition.stop();
+            stopListening();
 
             let question = rawTranscript.replace("hey alex", "").replace("alex", "").trim();
             if (!question) return;
@@ -155,22 +173,36 @@
 
         function speakText(text) {
             isSpeaking = true;
-            try { recognition.stop(); } catch(e){}
+            stopListening();
+
+            // Clear any previous queued audio
+            window.speechSynthesis.cancel();
 
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.pitch = 1;
-            utterance.rate = 1.1; // Slightly faster speech output
+            utterance.rate = 1.0;
 
             utterance.onstart = () => {
                 statusDiv.textContent = 'Alex speaking...';
             };
 
             utterance.onend = () => {
+                statusDiv.textContent = 'Clearing audio...';
+                
+                // 1-second delay lets speaker hardware completely close before opening mic
+                setTimeout(() => {
+                    isSpeaking = false;
+                    replyDiv.textContent = '';
+                    transcriptDiv.textContent = '';
+                    if (userWantsListening) {
+                        startListening();
+                    }
+                }, 1000); 
+            };
+
+            utterance.onerror = () => {
                 isSpeaking = false;
-                replyDiv.textContent = '';
-                transcriptDiv.textContent = '';
-                statusDiv.textContent = 'Listening... Say "Alex"';
-                try { recognition.start(); } catch(e){}
+                if (userWantsListening) startListening();
             };
 
             window.speechSynthesis.speak(utterance);
