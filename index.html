@@ -94,7 +94,6 @@
         }
         #send-btn:hover {
             background-color: #00c853;
-            transform: scale(1.02);
         }
     </style>
 </head>
@@ -104,9 +103,8 @@
 
     <div id="chat-container">
         <div class="message ai-message">Hello! I am Alex. Type a message below to test my brain!</div>
+        <div class="loading" id="loading-indicator">Alex is thinking... (Render might take ~45s to wake up on the first message)</div>
     </div>
-    
-    <div class="loading" id="loading-indicator">Alex is thinking... (Render might take ~45s to wake up on the first message)</div>
 
     <div id="input-container">
         <input type="text" id="message-input" placeholder="Ask Alex a question..." autocomplete="off">
@@ -119,21 +117,15 @@
         const sendBtn = document.getElementById('send-btn');
         const loadingIndicator = document.getElementById('loading-indicator');
 
-        // Pointing directly to your specific Render backend '/chat' endpoint
         const SERVER_URL = 'https://alex-backend-4q3s.onrender.com/chat';
 
         function addMessage(text, isUser) {
             const msgDiv = document.createElement('div');
             msgDiv.classList.add('message');
             msgDiv.classList.add(isUser ? 'user-message' : 'ai-message');
-            
-            // Replaces basic newlines with HTML breaks so paragraph spacing looks nice
             msgDiv.innerHTML = text.replace(/\n/g, '<br>');
             
-            // Insert the message right above the loading indicator
             chatContainer.insertBefore(msgDiv, loadingIndicator);
-            
-            // Auto-scroll to the bottom of the chat
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
@@ -141,16 +133,15 @@
             const text = messageInput.value.trim();
             if (!text) return;
 
-            // 1. Display the user's message
+            // Display user message
             addMessage(text, true);
             messageInput.value = '';
             
-            // 2. Show the "Thinking..." indicator
+            // Show loading state
             loadingIndicator.style.display = 'block';
             chatContainer.scrollTop = chatContainer.scrollHeight;
 
             try {
-                // 3. Send the HTTP POST request to your Render Server
                 const response = await fetch(SERVER_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -160,7 +151,6 @@
                 const data = await response.json();
                 loadingIndicator.style.display = 'none';
 
-                // 4. Display the AI's reply
                 if (data.reply) {
                     addMessage(data.reply, false);
                 } else {
@@ -173,10 +163,7 @@
             }
         }
 
-        // Trigger send when clicking the button
         sendBtn.addEventListener('click', sendMessage);
-
-        // Trigger send when pressing the "Enter" key on the keyboard
         messageInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 sendMessage();
